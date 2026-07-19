@@ -303,7 +303,7 @@ class TimelineApp {
                         image.onerror = function() {
                             this.style.display = 'none';
                         };
-                        image.src = `${this.currentSource}/${event.id}.jpg`; 
+                        image.src = `${this.currentSource}/avatars/${event.id}.jpg`; 
                         card.appendChild(image);
                     }
                     
