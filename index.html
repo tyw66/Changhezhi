@@ -25,6 +25,10 @@
             <div class="source-select-wrapper">
                 <select class="source-select" id="sourceSelect"></select>
             </div>
+            <div class="mode-toggle">
+                <button class="mode-btn active" data-mode="timeline">时间线</button>
+                <button class="mode-btn" data-mode="slice">时间切片</button>
+            </div>
             <div class="filter-select-wrapper" id="filterSelectWrapper">
                 <input type="text" class="filter-input" id="filterInput" readonly placeholder="选择标签筛选">
                 <span class="filter-arrow" id="filterArrow">▼</span>
@@ -44,11 +48,26 @@
     </div>
 
     <main class="main-content">
-        <div class="timeline-container">
+        <div class="timeline-container" id="timelineContainer">
             <div class="timeline-line"></div>
             <div class="timeline-nodes" id="timelineNodes"></div>
         </div>
+        <div class="slice-container" id="sliceContainer" style="display: none;">
+            <div class="slice-cards" id="sliceCards"></div>
+        </div>
     </main>
+
+    <div class="time-slider-container" id="timeSliderContainer" style="display: none;">
+        <div class="time-slider-wrapper">
+            <div class="time-slider-label">
+                <span class="time-slider-year" id="timeSliderYear">-</span>
+                <span class="time-slider-count" id="timeSliderCount">0 项内容</span>
+            </div>
+            <input type="range" class="time-slider" id="timeSlider" min="1900" max="2100" value="2000" step="1">
+            <div class="time-slider-ticks" id="timeSliderTicks"></div>
+            <div class="time-slider-markers" id="timeSliderMarkers"></div>
+        </div>
+    </div>
 
     <footer class="footer">
         <span id="busuanzi_container_uv">本站访客数<span id="busuanzi_value_site_pv"></span>人</span>

@@ -9,6 +9,21 @@ class TimelineApp {
     constructor() {
         // 时间线节点容器
         this.timelineNodes = document.getElementById('timelineNodes');
+        this.timelineContainer = document.getElementById('timelineContainer');
+        
+        // 时间切片模式元素
+        this.sliceContainer = document.getElementById('sliceContainer');
+        this.sliceCards = document.getElementById('sliceCards');
+        this.timeSliderContainer = document.getElementById('timeSliderContainer');
+        this.timeSlider = document.getElementById('timeSlider');
+        this.timeSliderYear = document.getElementById('timeSliderYear');
+        this.timeSliderCount = document.getElementById('timeSliderCount');
+        this.timeSliderTicks = document.getElementById('timeSliderTicks');
+        this.timeSliderMarkers = document.getElementById('timeSliderMarkers');
+        
+        // 模式切换按钮
+        this.modeToggle = document.querySelector('.mode-toggle');
+        this.modeBtns = document.querySelectorAll('.mode-btn');
         
         // 侧边栏相关元素
         this.sidebar = document.getElementById('sidebar');
@@ -46,6 +61,14 @@ class TimelineApp {
         this.selectedTag = null;             // 当前选中的筛选标签
         this.tagCounts = {};                 // 标签计数映射
         this.currentSource = this.getSavedSource();  // 当前数据源路径
+        this.currentMode = 'timeline';       // 当前模式：timeline | slice
+        this.currentYear = 2000;             // 当前选中年份
+        
+        // 数据索引（性能优化）
+        this.yearIndex = {};                 // 年份到事件的映射索引
+        this.dateRangeIndex = [];            // 按日期范围排序的索引
+        this.minYear = 1900;                 // 最小年份
+        this.maxYear = 2100;                 // 最大年份
         
         // 初始化应用
         this.init();
@@ -58,9 +81,12 @@ class TimelineApp {
         this.renderSourceOptions();  // 渲染数据源选择选项
         await this.loadEvents();     // 加载事件数据
         this.buildTagCounts();       // 统计标签数量
+        this.buildYearIndex();       // 建立年份索引
         this.renderFilterDropdown(); // 渲染标签筛选下拉菜单
         this.renderTimeline();       // 渲染时间线
+        this.initTimeSlider();       // 初始化时间滑杆
         this.bindEvents();           // 绑定事件监听器
+        this.bindSliceEvents();      // 绑定时间切片模式事件
     }
     
     /**
@@ -124,10 +150,75 @@ class TimelineApp {
                 const subtitle = document.querySelector('header .subtitle');
                 if (subtitle) subtitle.textContent = data.description;
             }
+            
+            // 解析日期并计算年份范围
+            this.calculateYearRange();
         } catch (error) {
             console.error('Failed to load events:', error);
             this.events = this.getDefaultEvents();
+            this.calculateYearRange();
         }
+    }
+    
+    /**
+     * 计算年份范围
+     */
+    calculateYearRange() {
+        let min = Infinity;
+        let max = -Infinity;
+        
+        this.events.forEach(event => {
+            const dateYear = this.extractYear(event.date);
+            const endYear = event.date_end === 'now' ? new Date().getFullYear() : this.extractYear(event.date_end);
+            
+            if (dateYear < min) min = dateYear;
+            if (endYear > max) max = endYear;
+        });
+        
+        this.minYear = min - 5;
+        this.maxYear = max + 5;
+        this.currentYear = Math.floor((this.minYear + this.maxYear) / 2);
+    }
+    
+    /**
+     * 从日期字符串中提取年份
+     * @param {string} dateStr - 日期字符串
+     * @returns {number} 年份
+     */
+    extractYear(dateStr) {
+        const match = dateStr.match(/(\d{4})/);
+        return match ? parseInt(match[1]) : 0;
+    }
+    
+    /**
+     * 建立年份索引（性能优化）
+     * 为每个年份预计算哪些事件在该年份存在
+     */
+    buildYearIndex() {
+        this.yearIndex = {};
+        
+        // 初始化年份范围
+        for (let year = this.minYear; year <= this.maxYear; year++) {
+            this.yearIndex[year] = [];
+        }
+        
+        this.events.forEach((event, index) => {
+            const startYear = this.extractYear(event.date);
+            const endYear = event.date_end === 'now' ? new Date().getFullYear() : this.extractYear(event.date_end);
+            
+            for (let year = startYear; year <= endYear; year++) {
+                if (this.yearIndex[year]) {
+                    this.yearIndex[year].push(index);
+                }
+            }
+        });
+        
+        // 建立日期范围索引（用于二分查找优化）
+        this.dateRangeIndex = this.events.map((event, index) => ({
+            start: this.extractYear(event.date),
+            end: event.date_end === 'now' ? new Date().getFullYear() : this.extractYear(event.date_end),
+            index: index
+        })).sort((a, b) => a.start - b.start);
     }
     
     /**
@@ -380,51 +471,10 @@ class TimelineApp {
             // 渲染事件卡片
             if (data.events.length > 0) {
                 data.events.forEach((event, eventIndex) => {
-                    const card = document.createElement('div');
-                    card.className = 'node-card';
-                    card.dataset.eventIndex = eventIndex;
+                    const card = this.createEventCard(event, eventIndex);
                     // 存储标签数据用于筛选
                     const tags = Array.isArray(event.tag) ? event.tag : (event.tag ? [event.tag] : []);
                     card.dataset.tags = tags.join(',');
-                    
-                    // 事件图片
-                    if (event.id) {
-                        const image = document.createElement('img');
-                        image.className = 'card-image';
-                        image.alt = event.name;
-                        image.loading = 'lazy';
-                        // 图片加载失败时隐藏
-                        image.onerror = function() {
-                            this.style.display = 'none';
-                        };
-                        image.src = `${this.currentSource}/avatars/${event.id}.jpg`; 
-                        card.appendChild(image);
-                    }
-                    
-                    // 卡片内容
-                    const content = document.createElement('div');
-                    content.className = 'card-content';
-                    
-                    const cardHeader = document.createElement('div');
-                    cardHeader.className = 'card-header';
-                    
-                    const title = document.createElement('div');
-                    title.className = 'card-title';
-                    title.textContent = event.name;
-                    
-                    const date = document.createElement('div');
-                    date.className = 'card-date';
-                    // 显示第一个标签作为分类（设计如此）
-                    const author = Array.isArray(event.tag) ? event.tag[0] : event.tag;
-                    date.textContent = author || event.date;
-                    
-                    cardHeader.appendChild(title);
-                    cardHeader.appendChild(date);
-                    
-                    content.appendChild(cardHeader);
-                    
-                    card.appendChild(content);
-                    
                     cardsWrapper.appendChild(card);
                 });
             } else {
@@ -444,6 +494,54 @@ class TimelineApp {
             
             this.timelineNodes.appendChild(node);
         });
+    }
+    
+    /**
+     * 创建事件卡片（共享方法）
+     * @param {Object} event - 事件对象
+     * @param {number} eventIndex - 事件索引
+     * @returns {HTMLElement} 卡片元素
+     */
+    createEventCard(event, eventIndex) {
+        const card = document.createElement('div');
+        card.className = 'node-card';
+        card.dataset.eventIndex = eventIndex;
+        
+        if (event.id) {
+            const image = document.createElement('img');
+            image.className = 'card-image';
+            image.alt = event.name;
+            image.loading = 'lazy';
+            image.onerror = function() {
+                this.style.display = 'none';
+            };
+            image.src = `${this.currentSource}/avatars/${event.id}.jpg`;
+            card.appendChild(image);
+        }
+        
+        const content = document.createElement('div');
+        content.className = 'card-content';
+        
+        const cardHeader = document.createElement('div');
+        cardHeader.className = 'card-header';
+        
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        title.textContent = event.name;
+        
+        const date = document.createElement('div');
+        date.className = 'card-date';
+        const author = Array.isArray(event.tag) ? event.tag[0] : event.tag;
+        date.textContent = author || event.date;
+        
+        cardHeader.appendChild(title);
+        cardHeader.appendChild(date);
+        
+        content.appendChild(cardHeader);
+        
+        card.appendChild(content);
+        
+        return card;
     }
     
     /**
@@ -504,8 +602,15 @@ class TimelineApp {
         this.clearFilter();
         await this.loadEvents();
         this.buildTagCounts();
+        this.buildYearIndex();
         this.renderFilterDropdown();
-        this.renderTimeline();
+        
+        if (this.currentMode === 'timeline') {
+            this.renderTimeline();
+        } else {
+            this.initTimeSlider();
+            this.renderSliceCards(this.currentYear);
+        }
     }
     
     /**
@@ -632,7 +737,7 @@ class TimelineApp {
     
     /**
      * 设置当前激活的时间节点
-     * @param {HTMLElement} node - 时间节点元素
+     * @param {HTMLElement|null} node - 时间节点元素
      */
     setActiveNode(node) {
         // 清除之前的激活状态
@@ -643,7 +748,9 @@ class TimelineApp {
         }
         // 设置新的激活状态
         this.currentNode = node;
-        node.classList.add('active');
+        if (node) {
+            node.classList.add('active');
+        }
     }
     
     /**
@@ -656,6 +763,243 @@ class TimelineApp {
             cards.forEach(c => c.classList.remove('active-card'));
             this.currentNode = null;
         }
+    }
+    
+    /**
+     * 初始化时间滑杆
+     */
+    initTimeSlider() {
+        this.timeSlider.min = this.minYear;
+        this.timeSlider.max = this.maxYear;
+        this.timeSlider.value = this.currentYear;
+        this.timeSliderYear.textContent = this.currentYear;
+        
+        this.renderSliderTicks();
+        this.renderSliderMarkers();
+    }
+    
+    /**
+     * 渲染时间滑杆刻度
+     */
+    renderSliderTicks() {
+        this.timeSliderTicks.innerHTML = '';
+        const totalYears = this.maxYear - this.minYear;
+        const tickCount = Math.min(50, totalYears);
+        
+        for (let i = 0; i <= tickCount; i++) {
+            const tick = document.createElement('div');
+            tick.className = 'time-slider-tick';
+            
+            const year = this.minYear + Math.floor((i / tickCount) * totalYears);
+            if (year % 10 === 0) {
+                tick.classList.add('major');
+            }
+            
+            this.timeSliderTicks.appendChild(tick);
+        }
+    }
+    
+    /**
+     * 渲染时间滑杆标记
+     */
+    renderSliderMarkers() {
+        this.timeSliderMarkers.innerHTML = '';
+        
+        let year = this.minYear;
+        while (year <= this.maxYear) {
+            const marker = document.createElement('div');
+            marker.className = 'time-slider-marker';
+            marker.textContent = year;
+            this.timeSliderMarkers.appendChild(marker);
+            
+            const interval = year < 2000 ? 50 : 20;
+            year += interval;
+        }
+    }
+    
+    /**
+     * 切换显示模式
+     * @param {string} mode - 模式名称：timeline | slice
+     */
+    switchMode(mode) {
+        this.currentMode = mode;
+        
+        // 更新按钮状态
+        this.modeBtns.forEach(btn => {
+            if (btn.dataset.mode === mode) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+        
+        // 切换容器显示
+        if (mode === 'timeline') {
+            this.timelineContainer.style.display = 'block';
+            this.sliceContainer.style.display = 'none';
+            this.timeSliderContainer.style.display = 'none';
+            this.renderTimeline();
+        } else {
+            this.timelineContainer.style.display = 'none';
+            this.sliceContainer.style.display = 'block';
+            this.timeSliderContainer.style.display = 'block';
+            this.initTimeSlider();
+            this.renderSliceCards(this.currentYear);
+        }
+        
+        this.hideSidebar();
+    }
+    
+    /**
+     * 获取指定年份的事件列表（使用预计算索引）
+     * @param {number} year - 年份
+     * @returns {Array} 事件列表
+     */
+    getEventsByYear(year) {
+        const eventIndices = this.yearIndex[year] || [];
+        
+        return eventIndices.map(index => ({
+            ...this.events[index],
+            __index: index
+        }));
+    }
+    
+    /**
+     * 获取指定年份的事件列表（使用二分查找优化）
+     * @param {number} year - 年份
+     * @returns {Array} 事件列表
+     */
+    getEventsByYearOptimized(year) {
+        const result = [];
+        
+        let left = 0;
+        let right = this.dateRangeIndex.length - 1;
+        
+        while (left <= right) {
+            const mid = Math.floor((left + right) / 2);
+            const range = this.dateRangeIndex[mid];
+            
+            if (range.start <= year) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        
+        const candidates = this.dateRangeIndex.slice(0, left);
+        
+        for (const range of candidates) {
+            if (year <= range.end) {
+                result.push({
+                    ...this.events[range.index],
+                    __index: range.index
+                });
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * 渲染时间切片卡片
+     * @param {number} year - 年份
+     */
+    renderSliceCards(year) {
+        this.currentYear = year;
+        this.timeSlider.value = year;
+        this.timeSliderYear.textContent = year;
+        
+        let events;
+        
+        if (this.events.length > 1000) {
+            events = this.getEventsByYearOptimized(year);
+        } else {
+            events = this.getEventsByYear(year);
+        }
+        
+        this.timeSliderCount.textContent = `${events.length} 项内容`;
+        
+        if (events.length === 0) {
+            this.renderEmptySlice();
+            return;
+        }
+        
+        this.sliceCards.innerHTML = '';
+        
+        events.forEach((event) => {
+            const card = this.createEventCard(event, event.__index);
+            card.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.showSidebar(event, null);
+            });
+            this.sliceCards.appendChild(card);
+        });
+    }
+    
+    /**
+     * 渲染空状态
+     */
+    renderEmptySlice() {
+        this.sliceCards.innerHTML = `
+            <div class="slice-empty">
+                <div class="slice-empty-icon">📅</div>
+                <div class="slice-empty-text">${this.currentYear} 年暂无内容</div>
+                <div class="slice-empty-subtext">请尝试拖动时间滑杆选择其他年份</div>
+            </div>
+        `;
+    }
+    
+    /**
+     * 处理时间切片卡片点击事件
+     * @param {Event} e - 点击事件
+     */
+    handleSliceCardClick(e) {
+        const card = e.target.closest('.node-card');
+        if (!card) return;
+        
+        const eventIndex = parseInt(card.dataset.eventIndex);
+        const event = this.events[eventIndex];
+        
+        if (!event) return;
+        
+        this.showSidebar(event, null);
+    }
+    
+    /**
+     * 处理时间滑杆变化事件
+     * @param {Event} e - 事件对象
+     */
+    handleTimeSliderChange(e) {
+        const year = parseInt(e.target.value);
+        this.renderSliceCards(year);
+    }
+    
+    /**
+     * 绑定时间切片模式事件
+     */
+    bindSliceEvents() {
+        // 模式切换事件
+        this.modeToggle.addEventListener('click', (e) => {
+            const btn = e.target.closest('.mode-btn');
+            if (btn && btn.dataset.mode !== this.currentMode) {
+                this.switchMode(btn.dataset.mode);
+            }
+        });
+        
+        // 时间滑杆事件
+        this.timeSlider.addEventListener('input', (e) => {
+            const year = parseInt(e.target.value);
+            this.timeSliderYear.textContent = year;
+        });
+        
+        this.timeSlider.addEventListener('change', (e) => {
+            this.handleTimeSliderChange(e);
+        });
+        
+        // 时间切片卡片点击事件
+        this.sliceCards.addEventListener('click', (e) => {
+            this.handleSliceCardClick(e);
+        });
     }
 }
 
